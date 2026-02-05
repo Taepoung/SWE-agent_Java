@@ -72,6 +72,25 @@ Problems without a valid `docker_image` entry **will fail at execution time**.
 
 ## 6. Usage
 
+### 6.0.0 Install
+
+```bash
+git clone https://github.com/SWE-agent/SWE-agent.git
+pip install -e .
+```
+### 6.0.1 Environment Variable
+```bash
+# Remove the comment '#' in front of the line for all keys that you have set
+OPENAI_API_BASE="https://your-custom-api.com/v1"
+GITHUB_TOKEN='GitHub Token for access to private repos'
+OPENAI_API_KEY='OpenAI API Key Here if using OpenAI Model'
+ANTHROPIC_API_KEY='Anthropic API Key Here if using Anthropic Model'
+TOGETHER_API_KEY='Together API Key Here if using Together Model'
+```
+### 6.0.1 Supported Model
+Model should be supported by litellm.
+[supported list](https://docs.litellm.ai/docs/providers)
+
 ### 6.1 Basic Command
 
 ```bash
