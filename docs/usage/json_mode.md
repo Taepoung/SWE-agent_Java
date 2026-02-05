@@ -79,6 +79,7 @@ git clone https://github.com/SWE-agent/SWE-agent.git
 pip install -e .
 ```
 ### 6.0.1 Environment Variable
+make .env file in Root
 ```bash
 # Remove the comment '#' in front of the line for all keys that you have set
 OPENAI_API_BASE="https://your-custom-api.com/v1"
