@@ -37,6 +37,7 @@ import rich
 def get_cli():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
+        # Positional Argument 
         "command",
         choices=[
             "run",
@@ -60,20 +61,31 @@ def get_cli():
             "qs",
             "shell",
             "sh",
+
+            "run-json",
+            "j"
         ],
+        # 0개 혹은 1개
         nargs="?",
     )
+    # -h혹은 --help가 들어오면 True
     parser.add_argument("-h", "--help", action="store_true", help="Show this help message and exit")
     return parser
 
-
+# arg에 따라
 def main(args: list[str] | None = None):
+
+    # 파일 이름을 제외하고 arg를 가져옴
     if args is None:
         args = sys.argv[1:]
+
+    # command와 그 외 분리
     cli = get_cli()
     parsed_args, remaining_args = cli.parse_known_args(args)  # type: ignore
     command = parsed_args.command
     show_help = parsed_args.help
+
+    # command 여부 분기
     if show_help:
         if not command:
             # Show main help
@@ -85,6 +97,7 @@ def main(args: list[str] | None = None):
     elif not command:
         cli.print_help()
         sys.exit(2)
+
     # Defer imports to avoid unnecessary long loading times
     if command in ["run", "r"]:
         from sweagent.run.run_single import run_from_cli as run_single_main
@@ -138,6 +151,11 @@ def main(args: list[str] | None = None):
         from sweagent.run.run_shell import run_from_cli as run_shell_main
 
         run_shell_main(remaining_args)
+
+    elif command in ["run-json", "j"]:
+        from sweagent.run.run_json import run_from_cli as run_json_main
+
+        run_json_main(remaining_args)
     else:
         msg = f"Unknown command: {command}"
         raise ValueError(msg)

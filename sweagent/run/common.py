@@ -287,6 +287,8 @@ class BasicCLI:
 
         config_merged = {}
         config_files = []
+
+        # Config가 들어왔을 때
         if cli_args.config:
             config_files.extend(cli_args.config)
             for _f in cli_args.config:
@@ -296,6 +298,8 @@ class BasicCLI:
                     continue
                 _loaded = yaml.safe_load(txt)
                 merge_nested_dicts(config_merged, _loaded)
+
+        # default config 사용 True시
         elif self.default_settings and not cli_args.no_config_file:
             config_file = self.default_config_file
             config_files.append(config_file)
@@ -305,15 +309,20 @@ class BasicCLI:
             )
             self.logger.info(msg)
             txt = config_file.read_text()
+
             if not txt.strip():
                 self.logger.warning(f"Default config file {config_file} is empty")
                 config_merged = {}
             else:
                 config_merged = yaml.safe_load(txt)
+
+        # Config 도 없고, default config 사용 False시 
         else:
             config_merged = {}
 
+
         # For informational purposes, we also merge in the command line options
+        # arg를 통해 직접 입력해 생성할 config 변수들
         cl_options_dict = _parse_args_to_nested_dict(remaining_args)
 
         # >>> Step 4: Bring together remaining arguments and the merged config to initialize the config object

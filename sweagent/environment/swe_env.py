@@ -41,6 +41,8 @@ class EnvironmentConfig(BaseModel):
     """Timeout for the post-startup commands.
     NOTE: The timeout applies to every command in `post_startup_commands` separately.
     """
+    reset_timeout: int = 120
+    """Timeout for the reset command."""
 
     # pydantic config
     model_config = ConfigDict(extra="forbid")
@@ -56,6 +58,7 @@ class SWEEnv:
         repo: Repo | RepoConfig | None,
         post_startup_commands: list[str],
         post_startup_command_timeout: int = 500,
+        reset_timeout: int = 600,
         hooks: list[EnvHook] | None = None,
         name: str = "main",
     ):
@@ -78,6 +81,7 @@ class SWEEnv:
         self.name = name
         self.clean_multi_line_functions = lambda x: x
         self._chook = CombinedEnvHooks()
+        self.reset_timeout = reset_timeout 
         for hook in hooks or []:
             self.add_hook(hook)
 
@@ -90,10 +94,12 @@ class SWEEnv:
         # Always copy config to avoid shared state between different instances
         config = config.model_copy(deep=True)
         return cls(
+            #해당 config를 가진 배포환경 가져옴
             deployment=get_deployment(config.deployment),
             repo=config.repo,
             post_startup_commands=config.post_startup_commands,
             post_startup_command_timeout=config.post_startup_command_timeout,
+            reset_timeout=config.reset_timeout,
             name=config.name,
         )
 
@@ -162,7 +168,7 @@ class SWEEnv:
                 check="raise",
                 error_msg="Failed to clean repository",
                 # Sometimes this is slow because it rebuilds some index
-                timeout=120,
+                timeout=self.reset_timeout,
             )
 
     def close(self) -> None:

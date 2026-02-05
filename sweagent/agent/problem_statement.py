@@ -67,6 +67,7 @@ class EmptyProblemStatement(_BuiltinProblemStatementBase):
 
 class TextProblemStatement(_BuiltinProblemStatementBase):
     text: str
+    type: Literal["text"] = "text"
 
     extra_fields: dict[str, Any] = Field(default_factory=dict)
     """Any additional data to be added to the instance.

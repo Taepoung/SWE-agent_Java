@@ -163,11 +163,18 @@ class RunSingle:
 
     @classmethod
     def from_config(cls, config: RunSingleConfig) -> Self:
+
+        # 환경 변수 로드
         load_environment_variables(config.env_var_path)
+        # output_dir 설정
         config.set_default_output_dir()
         config.output_dir.mkdir(parents=True, exist_ok=True)
+        # agent 생성
         agent = get_agent_from_config(config.agent)
+        # 현재 config 저장
         agent.replay_config = config  # type: ignore[attr-defined]
+
+        # 시스템 인스턴스 생성
         self = cls(
             env=SWEEnv.from_config(config.env),
             agent=agent,
@@ -188,13 +195,17 @@ class RunSingle:
     def run(self):
         self._chooks.on_start()
         self.logger.info("Starting environment")
+
         self.env.start()
+
         self.logger.info("Running agent")
         self._chooks.on_instance_start(index=0, env=self.env, problem_statement=self.problem_statement)
         output_dir = self.output_dir / self.problem_statement.id
         output_dir.mkdir(parents=True, exist_ok=True)
+        
         if self.agent.replay_config is not None:  # type: ignore[attr-defined]
             (output_dir / "config.yaml").write_text(yaml.dump(self.agent.replay_config.model_dump_json(), indent=2))  # type: ignore[attr-defined]
+        
         result = self.agent.run(
             problem_statement=self.problem_statement,
             env=self.env,
@@ -204,17 +215,19 @@ class RunSingle:
         self.logger.info("Done")
         self._chooks.on_end()
         save_predictions(self.output_dir, self.problem_statement.id, result)
+
         self.env.close()
 
-
+# Config기반 실행
 def run_from_config(config: RunSingleConfig):
     RunSingle.from_config(config).run()
 
-
+# CLI -> Configuration 가공 후 run
 def run_from_cli(args: list[str] | None = None):
     if args is None:
         args = sys.argv[1:]
     assert __doc__ is not None
+    
     help_text = (  # type: ignore
         __doc__ + "\n[cyan][bold]=== ALL THE OPTIONS ===[/bold][/cyan]\n\n" + ConfigHelper().get_help(RunSingleConfig)
     )

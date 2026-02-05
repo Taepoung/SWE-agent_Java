@@ -295,7 +295,7 @@ class RetryAgent(AbstractAgent):
         """
         self._total_instance_attempt_stats = InstanceStats()
         self._problem_statement = problem_statement
-        self._traj_path = output_dir / (self._problem_statement.id + ".traj")
+        self._traj_path = output_dir / (self._problem_statement.id + ".json")
         self._env = env
         self._output_dir = output_dir
         self._rloop = get_retry_loop_from_config(self.config.retry_loop, problem_statement=problem_statement)
@@ -586,7 +586,7 @@ class DefaultAgent(AbstractAgent):
         self.logger.info("Setting up agent for instance %s", iid)
 
         # Save/reset some attributes
-        self.traj_path = output_dir / (self._problem_statement.id + ".traj")
+        self.traj_path = output_dir / (self._problem_statement.id + ".json")
         self.logger.info("Trajectory will be saved to %s", self.traj_path)
 
         self._chook.on_tools_installation_started()

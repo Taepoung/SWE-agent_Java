@@ -52,7 +52,38 @@ In addition to the above errors, please also check the following:
 Edit the file again if necessary.
 """
 
+# Multi Lang Support
+LANGUAGE_CONFIG = {
+    ".py": {
+        "name": "python",
+        "pattern": [r"^\s*def\s+", r"^\s*class\s+", r"^\s*@"],
+        "query": """
+        (function_definition body: (_) @body)
+        """,
+        "lint_command": "flake8",
+        "lint_args": "--isolated --select=F821,F822,F831,E111,E112,E113,E999,E902"
+    },
+    ".java": {
+        "name": "java",
+        "pattern": [
+            r"^\s*package\s+", 
+            r"^\s*(public|protected|private|static|abstract|final)?\s*(class|interface|enum)\s+", 
+            r"^\s*@"
+        ],
+        "query": """
+        (method_declaration body: (_) @body)
+        (constructor_declaration body: (_) @body)
+        (class_declaration body: (_) @body)
+        (interface_declaration body: (_) @body)
+        (enum_declaration body: (_) @body)
+        """,
+        "lint_command": "javac",
+        "lint_args": ""
+    }
+}
 
+
+# 일정 길이로 출력 제한
 def maybe_truncate(content: str, truncate_after: Optional[int] = MAX_RESPONSE_LEN):
     """Truncate content and append a notice if content exceeds the specified length."""
     return (
@@ -61,10 +92,8 @@ def maybe_truncate(content: str, truncate_after: Optional[int] = MAX_RESPONSE_LE
         else content[:truncate_after] + TRUNCATED_MESSAGE
     )
 
-
-class Flake8Error:
-    """A class to represent a single flake8 error"""
-
+# ========================== New Linting ==========================
+class LintingError:
     def __init__(self, filename: str, line_number: int, col_number: int, problem: str):
         self.filename = filename
         self.line_number = line_number
@@ -73,16 +102,25 @@ class Flake8Error:
 
     @classmethod
     def from_line(cls, line: str):
-        try:
-            prefix, _sep, problem = line.partition(": ")
-            filename, line_number, col_number = prefix.split(":")
-        except (ValueError, IndexError) as e:
-            msg = f"Invalid flake8 error line: {line}"
-            raise ValueError(msg) from e
-        return cls(filename, int(line_number), int(col_number), problem)
+        # Regex to handle both formats:
+        # Flake8: filename:line:col: problem
+        # Javac:  filename:line: problem
+        # Windows handling: filename can be C:\path\to\file.py
+        regex = r"^(?P<filename>.+?):(?P<line>\d+)(?::(?P<col>\d+))?: (?P<problem>.+)$"
+        match = re.match(regex, line)
+        if not match:
+            raise ValueError(f"Invalid linting error line: {line}")
+        
+        data = match.groupdict()
+        return cls(
+            data["filename"], 
+            int(data["line"]), 
+            int(data["col"]) if data["col"] else 0, 
+            data["problem"]
+        )
 
     def __eq__(self, other):
-        if not isinstance(other, Flake8Error):
+        if not isinstance(other, LintingError):
             return NotImplemented
         return (
             self.filename == other.filename
@@ -92,12 +130,11 @@ class Flake8Error:
         )
 
     def __repr__(self):
-        return f"Flake8Error(filename={self.filename}, line_number={self.line_number}, col_number={self.col_number}, problem={self.problem})"
-
+        return f"LintingError(filename={self.filename}, line_number={self.line_number}, col_number={self.col_number}, problem={self.problem})"
 
 def _update_previous_errors(
-    previous_errors: List[Flake8Error], replacement_window: Tuple[int, int], replacement_n_lines: int
-) -> List[Flake8Error]:
+    previous_errors: List[LintingError], replacement_window: Tuple[int, int], replacement_n_lines: int
+) -> List[LintingError]:
     """Update the line numbers of the previous errors to what they would be after the edit window.
     This is a helper function for `_filter_previous_errors`.
 
@@ -124,11 +161,10 @@ def _update_previous_errors(
             # either way (we wouldn't know how to adjust the line number anyway)
             continue
         # We're out of the edit window, so we need to adjust the line number
-        updated.append(Flake8Error(error.filename, error.line_number + lines_added, error.col_number, error.problem))
+        updated.append(LintingError(error.filename, error.line_number + lines_added, error.col_number, error.problem))
     return updated
 
-
-def format_flake8_output(
+def format_lint_output(
     input_string: str,
     show_line_numbers: bool = False,
     *,
@@ -136,74 +172,86 @@ def format_flake8_output(
     replacement_window: Optional[Tuple[int, int]] = None,
     replacement_n_lines: Optional[int] = None,
 ) -> str:
-    """Filter flake8 output for previous errors and print it for a given file.
-
-    Args:
-        input_string: The flake8 output as a string
-        show_line_numbers: Whether to show line numbers in the output
-        previous_errors_string: The previous errors as a string
-        replacement_window: The window of the edit (lines that will be replaced)
-        replacement_n_lines: The number of lines used to replace the text
-
-    Returns:
-        The filtered flake8 output as a string
-    """
-    # print(f"Replacement window: {replacement_window}")
-    # print("Replacement n lines:", replacement_n_lines)
-    # print("Previous errors string:", previous_errors_string)
-    # print("Input string:", input_string)
-    errors = [Flake8Error.from_line(line.strip()) for line in input_string.split("\n") if line.strip()]
-    # print(f"New errors before filtering: {errors=}")
+    """Filter lint output for previous errors and print it for a given file."""
+    # lint 에러를 파싱하여 리스트에 추가(이상한 에러는 추가하지 않음)
+    errors = []
+    for line in input_string.split("\n"):
+        if not line.strip(): continue
+        try:
+            errors.append(LintingError.from_line(line.strip()))
+        except ValueError:
+            pass
+    
+    # 이전 에러를 파싱하여 리스트에 추가(이상한 에러는 추가하지 않음)
     lines = []
     if previous_errors_string:
         assert replacement_window is not None
         assert replacement_n_lines is not None
-        previous_errors = [
-            Flake8Error.from_line(line.strip()) for line in previous_errors_string.split("\n") if line.strip()
-        ]
-        # print(f"Previous errors before updating: {previous_errors=}")
+        
+        previous_errors = []
+        for line in previous_errors_string.split("\n"):
+            if not line.strip(): continue
+            try:
+                previous_errors.append(LintingError.from_line(line.strip()))
+            except ValueError:
+                pass
+        
+        # 이전 에러를 수정된 코드에 맞게 업데이트(줄 업데이트)
         previous_errors = _update_previous_errors(previous_errors, replacement_window, replacement_n_lines)
-        # print(f"Previous errors after updating: {previous_errors=}")
+        # 이전 에러와 현재 에러 중복 제거
         errors = [error for error in errors if error not in previous_errors]
-        # Sometimes new errors appear above the replacement window that were 'shadowed' by the previous errors
-        # they still clearly aren't caused by the edit.
+        # 현재 에러 중 더이상 보이지 않는 에러 제거
         errors = [error for error in errors if error.line_number >= replacement_window[0]]
-        # print(f"New errors after filtering: {errors=}")
+
+    # 에러를 출력
     for error in errors:
         if not show_line_numbers:
             lines.append(f"- {error.problem}")
         else:
-            lines.append(f"- line {error.line_number} col {error.col_number}: {error.problem}")
+            col_str = f" col {error.col_number}" if error.col_number > 0 else ""
+            lines.append(f"- line {error.line_number}{col_str}: {error.problem}")
     return "\n".join(lines)
 
-
-def flake8(file_path: str) -> str:
-    """Run flake8 on a given file and return the output as a string"""
-    if Path(file_path).suffix != ".py":
+def lint(file_path: str) -> str:
+    """Run linting on a given file and return the output as a string"""
+    suffix = Path(file_path).suffix
+    if suffix not in LANGUAGE_CONFIG:
         return ""
-    cmd = REGISTRY.get("LINT_COMMAND", "flake8 --isolated --select=F821,F822,F831,E111,E112,E113,E999,E902 {file_path}")
+    
+    config = LANGUAGE_CONFIG[suffix]
+    base_cmd = config.get("lint_command")
+    args = config.get("lint_args", "")
+
+    cmd = REGISTRY.get("LINT_COMMAND", f"{base_cmd} {args} {file_path}")
+
     # don't use capture_output because it's not compatible with python3.6
-    out = subprocess.run(cmd.format(file_path=file_path), shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Combine stdout and stderr because some linters (like javac) output to stderr
+    out = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     return out.stdout.decode()
 
-
+# ========================== Sub Tools ==========================
 class Filemap:
-    def show_filemap(self, file_contents: str, encoding: str = "utf8"):
+    def show_filemap(self, file_contents: str, suffix: str, encoding: str = "utf8"):
         import warnings
         from tree_sitter_languages import get_language, get_parser
 
         warnings.simplefilter("ignore", category=FutureWarning)
 
-        parser = get_parser("python")
-        language = get_language("python")
+        try:
+            lang_config = LANGUAGE_CONFIG[suffix]
+            lang_name = lang_config["name"]
+            query_str = lang_config["query"]
+
+            parser = get_parser(lang_name)
+            language = get_language(lang_name)
+
+        except Exception:
+            return file_contents
 
         tree = parser.parse(bytes(file_contents.encode(encoding, errors="replace")))
 
         # See https://tree-sitter.github.io/tree-sitter/using-parsers#pattern-matching-with-queries.
-        query = language.query("""
-        (function_definition
-        body: (_) @body)
-        """)
+        query = language.query(query_str)
 
         # TODO: consider special casing docstrings such that they are not elided. This
         # could be accomplished by checking whether `body.text.decode('utf8')` starts
@@ -253,7 +301,7 @@ class WindowExpander:
         assert 0 <= max_added_lines
 
         # 1. Find line range that we want to search for breakpoints in
-
+        # 특정 방향을 따라 이어서 줄 가져오기
         if direction == 1:
             # down
             if current_line == len(lines):
@@ -275,27 +323,35 @@ class WindowExpander:
         # Every condition gives a score, the best score is the best breakpoint
         best_score = 0
         best_breakpoint = current_line
+
         for i_line in iter_lines:
             next_line = None
             line = lines[i_line - 1]
             if i_line + direction in iter_lines:
                 next_line = lines[i_line + direction - 1]
+
             score = 0
+            
             if line == "":
+                # 빈 줄
                 score = 1
                 if next_line == "":
-                    # Double new blank line:
+                    # 빈줄 두 번
                     score = 2
-            if self.suffix == ".py" and any(
-                re.match(regex, line) for regex in [r"^\s*def\s+", r"^\s*class\s+", r"^\s*@"]
-            ):
-                # We include decorators here, because they are always on top of the function/class definition
-                score = 3
+            
+            # 언어 별 패턴 매칭
+            if self.suffix in LANGUAGE_CONFIG:
+                if any(re.match(regex, line) for regex in LANGUAGE_CONFIG[self.suffix]["pattern"]):
+                    score = 3
+
+            # 스왑
             if score > best_score:
                 best_score = score
                 best_breakpoint = i_line
                 if direction == 1 and i_line != current_line:
                     best_breakpoint -= 1
+
+            # 파일 시작, 끝
             if i_line == 1 or i_line == len(lines):
                 score = 3
                 if score > best_score:
@@ -323,11 +379,15 @@ class WindowExpander:
             Tuple of 1-based line numbers of the start and end of the viewport.
             Both inclusive.
         """
-        # print("Input:", start, stop)
+        # 범위 유효 확인
         assert 1 <= start <= stop <= len(lines), (start, stop, len(lines))
+
+        # 최대 추가 라인 거름망
         if max_added_lines <= 0:
             # Already at max range, no expansion
             return start, stop
+        
+        # 범위 내에서 안잘리도록 최대한 표현할 수 있는 지점 찾기
         new_start = self._find_breakpoints(lines, start, direction=-1, max_added_lines=max_added_lines)
         new_stop = self._find_breakpoints(lines, stop, direction=1, max_added_lines=max_added_lines)
         # print(f"Expanded window is {new_start} to {new_stop}")
@@ -338,7 +398,7 @@ class WindowExpander:
         assert new_stop - stop <= max_added_lines, (new_stop, stop)
         return new_start, new_stop
 
-
+# ========================== Main Tool ==========================
 class EditTool:
     """
     An filesystem editor tool that allows the agent to view, create, and edit files.
@@ -373,6 +433,7 @@ class EditTool:
     ):
         _path = Path(path)
         self.validate_path(command, _path)
+
         if command == "view":
             return self.view(_path, view_range)
         elif command == "create":
@@ -396,6 +457,7 @@ class EditTool:
             return self.insert(_path, insert_line, new_str)
         elif command == "undo_edit":
             return self.undo_edit(_path)
+
         print(
             f'Unrecognized command {command}. The allowed commands for the {self.name} tool are: "view", "create", "str_replace", "insert", "undo_edit"'
         )
@@ -435,11 +497,14 @@ class EditTool:
 
     def view(self, path: Path, view_range: Optional[List[int]] = None):
         """Implement the view command"""
+
+        # 디렉토리 일 경우
         if path.is_dir():
             if view_range:
                 print("The `view_range` parameter is not allowed when `path` points to a directory.")
                 sys.exit(10)
 
+            # 디렉토리의 파일 목록을 찾음(2단계 깊이, 숨김 파일 제외)
             out = subprocess.run(
                 rf"find {path} -maxdepth 2 -not -path '*/\.*'",
                 shell=True,
@@ -449,19 +514,29 @@ class EditTool:
             stdout = out.stdout.decode()
             stderr = out.stderr.decode()
 
+            # 에러가 없으면 파일 목록을 출력
             if not stderr:
                 stdout = f"Here's the files and directories up to 2 levels deep in {path}, excluding hidden items:\n{stdout}\n"
                 print(stdout)
             return
 
+        # 파일 일 경우
         file_content = self.read_file(path)
+
+        # view_range가 주어졌으면
         if view_range:
+
+            # view_range : [start, end]
             if len(view_range) != 2 or not all(isinstance(i, int) for i in view_range):
                 print("Invalid `view_range`. It should be a list of two integers.")
                 sys.exit(11)
+            
+            # 파일 파싱
             file_lines = file_content.split("\n")
             n_lines_file = len(file_lines)
             init_line, final_line = view_range
+
+            # view_range의 범위가 파일의 범위를 벗어나면 에러
             if init_line < 1 or init_line > n_lines_file:
                 print(
                     f"Invalid `view_range`: {view_range}. Its first element `{init_line}` should be within the range of lines of the file: {[1, n_lines_file]}"
@@ -478,19 +553,24 @@ class EditTool:
                 )
                 sys.exit(14)
 
+            # view_range의 마지막이 -1이면 파일의 마지막으로
             if final_line == -1:
                 final_line = n_lines_file
 
             # Expand the viewport to include the whole function or class
+            # 도중에 코드가 짤리지 않도록 함수나 클래스의 범위로 확장
             init_line, final_line = WindowExpander(suffix=path.suffix).expand_window(
                 file_lines, init_line, final_line, max_added_lines=MAX_WINDOW_EXPANSION_VIEW
             )
 
             file_content = "\n".join(file_lines[init_line - 1 : final_line])
+
+        # view_range가 주어지지 않았으면 : Filemap
         else:
-            if path.suffix == ".py" and len(file_content) > MAX_RESPONSE_LEN and USE_FILEMAP:
-                try:
-                    filemap = Filemap().show_filemap(file_content, encoding=self._encoding or "utf-8")
+            # 파이썬 혹은 자바 파일이면
+            if path.suffix in LANGUAGE_CONFIG and len(file_content) > MAX_RESPONSE_LEN and USE_FILEMAP:
+                try:               
+                    filemap = Filemap().show_filemap(file_content, path.suffix, encoding=self._encoding or "utf-8")
                 except Exception:
                     # If we fail to show the filemap, just show the truncated file content
                     pass
@@ -499,6 +579,7 @@ class EditTool:
                         "<NOTE>This file is too large to display entirely. Showing abbreviated version. "
                         "Please use `str_replace_editor view` with the `view_range` parameter to show selected lines next.</NOTE>"
                     )
+                    # 일정 길이로 출력 제한
                     filemap = maybe_truncate(filemap.expandtabs())
                     print(filemap)
                     print(
@@ -508,7 +589,7 @@ class EditTool:
             # Else just show
             init_line = 1
 
-        # init_line is 1-based
+        # 범위에 따른 내용을 포멧에 맞추어 출력
         print(self._make_output(file_content, str(path), init_line=init_line))
 
     def str_replace(self, path: Path, old_str: str, new_str: Optional[str]):
@@ -535,34 +616,38 @@ class EditTool:
             print(f"No replacement was performed, old_str `{old_str}` is the same as new_str `{new_str}`.")
             sys.exit(161)
 
+        # 수정 전 linter 실행
         pre_edit_lint = ""
         if USE_LINTER:
             try:
-                pre_edit_lint = flake8(str(path))
+                pre_edit_lint = lint(str(path))
             except Exception as e:
                 print(f"Warning: Failed to run pre-edit linter on {path}: {e}")
 
-        # Replace old_str with new_str
+        # 치환
         new_file_content = file_content.replace(old_str, new_str)
-
-        # Write the new content to the file
+        
+        # 파일 쓰기
         self.write_file(path, new_file_content)
 
+        # 수정 후 linter 실행
         post_edit_lint = ""
         if USE_LINTER:
             try:
-                post_edit_lint = flake8(str(path))
+                post_edit_lint = lint(str(path))
             except Exception as e:
                 print(f"Warning: Failed to run post-edit linter on {path}: {e}")
 
         epilogue = ""
+
+        # lint 이후 결과 포맷에 맞추어 출력(피드백)
         if post_edit_lint:
             ...
             replacement_window_start_line = file_content.split(old_str)[0].count("\n") + 1
             replacement_lines = len(new_str.split("\n"))
             replacement_window_end_line = replacement_window_start_line + replacement_lines - 1
             replacement_window = (replacement_window_start_line, replacement_window_end_line)
-            errors = format_flake8_output(
+            errors = format_lint_output(
                 post_edit_lint,
                 previous_errors_string=pre_edit_lint,
                 replacement_window=replacement_window,
@@ -591,6 +676,7 @@ class EditTool:
 
         print(success_msg)
 
+    # Linter 없음
     def insert(self, path: Path, insert_line: int, new_str: str):
         """Implement the insert command, which inserts new_str at the specified line in the file content."""
         file_text = self.read_file(path).expandtabs()
@@ -677,10 +763,15 @@ class EditTool:
         expand_tabs: bool = True,
     ):
         """Generate output for the CLI based on the content of a file."""
+
+        # 일정 길이로 출력 제한
         file_content = maybe_truncate(file_content)
+        # tab을 공백으로 전환
         if expand_tabs:
             file_content = file_content.expandtabs()
+        # 파일 내용을 줄번호와 함께 출력
         file_content = "\n".join([f"{i + init_line:6}\t{line}" for i, line in enumerate(file_content.split("\n"))])
+        # 파일의 경로와 파일 내용을 같이 출력
         return f"Here's the result of running `cat -n` on {file_descriptor}:\n" + file_content + "\n"
 
 
