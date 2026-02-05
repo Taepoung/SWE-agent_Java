@@ -21,7 +21,9 @@ When using **JSON Mode with Java repositories**, the following configuration **m
 ```json
 "docker_args": [
   "-e",
-  "PATH=/root/python3.11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  "JAVA_HOME=/opt/java/openjdk",
+  "-e",
+  "PATH=/opt/java/openjdk/bin:/root/python3.11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ]
 ```
 
@@ -31,20 +33,6 @@ When using **JSON Mode with Java repositories**, the following configuration **m
 ```bash
 #!/usr/bin/env python3
 ```
-
----
-
-### 3. `post_startup_commands` (Install System Python)
-
-```json
-"post_startup_commands": [
-  "apt-get update",
-  "apt-get install -y python3"
-]
-```
-
-* Installs a **system-level `python3`** inside the container.
-* Guarantees compatibility with tools that depend on `env python3`.
 
 ---
 
@@ -59,7 +47,9 @@ When using **JSON Mode with Java repositories**, the following configuration **m
       "python_standalone_dir": "/root",
       "docker_args": [
         "-e",
-        "PATH=/root/python3.11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        "JAVA_HOME=/opt/java/openjdk",
+        "-e",
+        "PATH=/opt/java/openjdk/bin:/root/python3.11/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
       ]
     },
     "repo": {
@@ -68,10 +58,6 @@ When using **JSON Mode with Java repositories**, the following configuration **m
       "base_commit": "base_commit"
     }
   },
-  "post_startup_commands": [
-    "apt-get update",
-    "apt-get install -y python3"
-  ],
   "problem_statement": {
     "type": "text",
     "id": "problem id",
